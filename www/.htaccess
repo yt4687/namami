@@ -1,0 +1,7 @@
+RewriteEngine On
+RewriteCond %{QUERY_STRING} ^(.+)$
+RewriteRule ^(.+)$ $1\%3F%1?
+RewriteRule ^$ /tv
+RewriteRule ^api/v2/(.+)$ /api/v2_app/$1 [L]
+
+ForceType "text/html; charset=UTF-8"
