@@ -47,7 +47,7 @@
   "jk11": {
     "thread_id": 9,
     "name": "tvk",
-    "tags": ["tvk"]
+    "tags": ["tvk", "テレビ神奈川" ]
   },
   "jk12": {
     "thread_id": 10,
@@ -340,16 +340,19 @@
     "thread_id": 58,
     "bs": true,
     "name": "WOWOWプライム"
+    "tags": ["WOWOW_PRIME"]
   },
   "jk192": {
     "thread_id": 59,
     "bs": true,
     "name": "WOWOWライブ"
+    "tags": ["WOWOW_LIVE"]
   },
   "jk193": {
     "thread_id": 60,
     "bs": true,
     "name": "WOWOWシネマ"
+    "tags": ["WOWOW_CINEMA"]
   },
   "jk200": {
     "thread_id": 61,
