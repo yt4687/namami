@@ -2,6 +2,7 @@
 
 const process = require('process');
 const { URL, URLSearchParams } = require('url');
+const { Resolver } = require('dns').promises;
 const http = require('http');
 const https = require('https');
 const net = require('net');
@@ -14,6 +15,7 @@ const port = process.argv[3] ?? 80;
 const ms_port = 2525;
 const ms_address = process.argv[2] ?? '127.0.0.1'
 const http_port = port;
+const force_delay = 20;
 
 const lives = {};
 const threads = {};
@@ -45,17 +47,19 @@ function waitSeconds(delay) {
   return new Promise((resolve) => setTimeout(resolve, delay * 1000));
 }
 
-async function httpsRequest(url, options) {
+async function httpRequest(url, options) {
   return new Promise((resolve, reject) => {
-    const req = https.request(url, options, resolve);
+    const { protocol } = new URL(url);
+    const module = protocol == 'https:' ? https : http;
+    const req = module.request(url, options, resolve);
     req.on('error', reject);
     req.end();
   });
 }
 
-function httpsGet(url, options) {
+function httpGet(url, options) {
   debug('get', url.toString());
-  return httpsRequest(url, { method: 'GET', ...options });
+  return httpRequest(url, { method: 'GET', ...options });
 }
 
 function slurpMessage(message) {
@@ -74,7 +78,7 @@ async function searchLives(tags, status) {
     isTagSearch: 'true',
     keyword: tags.join(' ')
   });
-  const res = await httpsGet(url);
+  const res = await httpGet(url);
   const data = await slurpMessage(res);
   const re = new RegExp(
     '<a class="searchPage-ProgramList_ThumbnailLink" href="watch/([^"]+)">\n' +
@@ -84,7 +88,7 @@ async function searchLives(tags, status) {
 }
 
 async function getEmbeddedData(url) {
-  const res = await httpsGet(url);
+  const res = await httpGet(url);
   const data = await slurpMessage(res);
   const re = /id="embedded-data" data-props="([^"]+)/;
   const embedded_data = data.match(re);
@@ -317,7 +321,8 @@ function getLastRes(thread) {
   return last_res.substring(0, 50) + '...';
 }
 
-function handleGetFlv({ url, res }) {
+async function handleGetFlv({ url, res }) {
+  const use_ngrok = false;
   const video = url.searchParams.get('v');
   const channel = channels[video];
   const start_time = parseInt(url.searchParams.get('start_time'));
@@ -325,12 +330,13 @@ function handleGetFlv({ url, res }) {
   let params;
   if (channel && thread) {
     const archive = start_time ? { archive: 1 } : {};
+    const tunnel = use_ngrok ? await getNgrokTunnel() : null;
     params = new URLSearchParams({
       done: 'true',
       ...archive,
       thread_id: thread.id,
-      ms: ms_address,
-      ms_port: ms_port,
+      ms: tunnel?.address ?? ms_address,
+      ms_port: tunnel?.port ?? ms_port,
       http_port: http_port,
       channel_no: parseInt(video.substring(2)),
       channel_name: channel.name,
@@ -630,7 +636,7 @@ function createThread(thread_id) {
     resultcode: 0,
     id: thread_id,
     last_res: 0,
-    last_min_res: 0,
+    last_min_res: Array(60 / force_delay).fill(0),
     recent_res: Array(recent_length),
     ticket: '0x25252525',
     revision: 1,
@@ -750,7 +756,7 @@ function getLive(video) {
 }
 
 async function watchLive(video) {
-  const url = `https://live2.nicovideo.jp/watch/${video}`;
+  const url = `https://live.nicovideo.jp/watch/${video}`;
   const embedded_data = await getEmbeddedData(url);
   if (!embedded_data) return;
   const { program: { tag, status }, community } = embedded_data;
@@ -819,16 +825,15 @@ async function setPipesInterval() {
 }
 
 function setForceInterval() {
-  const delay = 60;
   return setInterval(() => {
     for (const video of Object.keys(channels)) {
       const thread = getThread(video);
       if (thread) {
-        thread.force = thread.last_res - thread.last_min_res;
-        thread.last_min_res = thread.last_res;
+        thread.force = thread.last_res - thread.last_min_res.shift();
+        thread.last_min_res.push(thread.last_res);
       }
     }
-  }, delay * 1000);
+  }, force_delay * 1000);
 }
 
 async function pipeLives(tags, videos) {
@@ -874,6 +879,20 @@ function isPiped(src, dest) {
 
 function closeServer(server) {
   return new Promise((resolve) => server.close(resolve));
+}
+
+async function getNgrokTunnel() {
+  const url = 'http://localhost:4040/api/tunnels/namami';
+  const res = await httpGet(url);
+  const data = await slurpMessage(res);
+  const { public_url, metrics: { conns: { rate1 } } } = JSON.parse(data);
+  const threshold = 0.5;
+  if (rate1 < threshold) {
+    const { hostname, port } = new URL(public_url);
+    const resolver = new Resolver();
+    const [address] = await resolver.resolve4(hostname);
+    return { address, port };
+  }
 }
 
 (async () => {
